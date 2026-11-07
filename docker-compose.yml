@@ -1,0 +1,33 @@
+name: postmortem-rag
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg18-trixie
+    container_name: postmortem-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postmortem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postmortem}
+      POSTGRES_DB: ${POSTGRES_DB:-postmortem}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Starting with Postgres 18, the volume must be mounted at /var/lib/postgresql
+      - postgres-data:/var/lib/postgresql
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  elasticmq:
+    # Local emulator compatible with the AWS SQS API
+    image: softwaremill/elasticmq-native:1.7.1
+    container_name: postmortem-elasticmq
+    ports:
+      - "${ELASTICMQ_PORT:-9324}:9324" # SQS-compatible API
+    volumes:
+      - ./docker/elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+
+volumes:
+  postgres-data:

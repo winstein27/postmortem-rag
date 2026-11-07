@@ -1,0 +1,34 @@
+{
+  "name": "postmortem-rag",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "producer": "tsx --env-file-if-exists=.env src/producer.ts",
+    "worker": "tsx --env-file-if-exists=.env src/worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "smoke": "tsx --env-file-if-exists=.env scripts/smoke.ts",
+    "queue:stats": "tsx --env-file-if-exists=.env scripts/queue-stats.ts",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --env-file=.env.test --import tsx --test \"test/unit/**/*.test.ts\"",
+    "test:integration": "node --env-file=.env.test --import tsx --test --test-concurrency=1 \"test/integration/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1164.0",
+    "pg": "^8.23.1",
+    "pgvector": "^0.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
