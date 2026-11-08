@@ -159,3 +159,7 @@ The goal is to measure the system, not just demo it.
 ## Data and rights
 
 The repository stores only the list of URLs and the ingestion code. Postmortem texts are downloaded on the machine that runs the pipeline and are never committed. Answers quote short excerpts and link to the original post.
+
+## License
+
+The code is released under the [MIT License](LICENSE). The license does not cover the postmortems themselves, which belong to their authors.
