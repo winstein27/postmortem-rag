@@ -2,6 +2,8 @@
 
 RAG over public incident postmortems (Cloudflare first): ask a question, get an answer grounded only in retrieved postmortem excerpts, with links to the sources.
 
+Public overview, design decisions, and roadmap: README.md. Tick the roadmap checkbox when a step is done.
+
 ## Architecture
 
 - **Producer** (`src/producer.ts`): reads `data/urls.txt` and sends one message per postmortem URL to the `postmortem-ingest` queue.
