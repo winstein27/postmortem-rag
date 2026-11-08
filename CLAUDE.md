@@ -16,7 +16,7 @@ Public overview, design decisions, and roadmap: README.md. Tick the roadmap chec
 - `docker compose up -d`: Postgres + pgvector (port 5432) and ElasticMQ (SQS API on 9324). ElasticMQ has no web UI; use `npm run queue:stats` to see queue message counts.
 - Configuration comes from environment variables (see `.env.example`): `DATABASE_URL`, `AWS_REGION`, `SQS_ENDPOINT`, `SQS_QUEUE_URL`. An empty `SQS_ENDPOINT` means real AWS SQS. Never hardcode endpoints or credentials.
 - Commands: `npm run producer`, `npm run worker`.
-- Tests: `npm run test:unit` (no Docker needed), `npm run test:integration` (needs the local stack running), `npm test` (both).
+- Tests: `npm run test:unit` (no Docker needed), `npm run test:watch` (unit tests, rerun on save), `npm run test:integration` (needs the local stack running), `npm test` (both).
 
 ## Decisions
 

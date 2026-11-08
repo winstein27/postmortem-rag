@@ -18,6 +18,7 @@
     "queue:stats": "tsx --env-file-if-exists=.env scripts/queue-stats.ts",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --env-file=.env.test --import tsx --test \"test/unit/**/*.test.ts\"",
+    "test:watch": "node --env-file=.env.test --import tsx --test --watch \"test/unit/**/*.test.ts\"",
     "test:integration": "node --env-file=.env.test --import tsx --test --test-concurrency=1 \"test/integration/**/*.test.ts\""
   },
   "dependencies": {

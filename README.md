@@ -93,6 +93,7 @@ All configuration comes from environment variables, validated at startup by `src
 
 ```bash
 npm run test:unit         # no Docker needed
+npm run test:watch        # unit tests, rerun on save
 npm run test:integration  # needs `npm run infra:up`
 npm test                  # both
 npm run typecheck
