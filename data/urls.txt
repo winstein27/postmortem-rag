@@ -1,2 +1,6 @@
 # Postmortem URLs, one per line.
-# This file will be filled in later.
+https://blog.cloudflare.com/18-november-2025-outage/
+https://blog.cloudflare.com/5-december-2025-outage/
+https://blog.cloudflare.com/cloudflare-outage-february-20-2026/
+https://blog.cloudflare.com/route-leak-incident-january-22-2026/
+https://blog.cloudflare.com/cloudflare-service-outage-june-12-2025/
