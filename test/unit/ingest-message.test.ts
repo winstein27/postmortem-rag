@@ -1,18 +1,26 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ingestMessage } from "../../src/queue/ingest-message.js";
-import z from "zod";
+import { describe, it } from "node:test";
+import { uuid } from "zod";
+import { createIngestMessage } from "../../src/ingest/ingest-message.js";
 
 describe("ingest message", () => {
-  it("should return an url and uuid object", () => {
-    const url = "url";
-    const urlSchema = z.uuid();
+  it("should return valid url and uuid object", () => {
+    const url = "https://url.com";
 
-    const message = ingestMessage(url);
-
-    const result = urlSchema.safeParse(message.traceId);
+    const message = createIngestMessage(url);
 
     assert.equal(message.url, url);
-    assert.equal(result.success, true);
+    assert.ok(uuid().validate(message.traceId));
+  });
+
+  it("should throws when url is invalid", () => {
+    assert.throws(() => createIngestMessage("ftp://invalid.com"));
+  });
+
+  it("should create different traceId for diferent inserts", () => {
+    const message1 = createIngestMessage("http://test.com");
+    const message2 = createIngestMessage("http://test.com");
+
+    assert.notEqual(message1.traceId, message2.traceId);
   });
 });
