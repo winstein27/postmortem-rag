@@ -13,11 +13,11 @@ describe("ingest message", () => {
     assert.ok(uuid().validate(message.traceId));
   });
 
-  it("should throws when url is invalid", () => {
+  it("should throw when url is invalid", () => {
     assert.throws(() => createIngestMessage("ftp://invalid.com"));
   });
 
-  it("should create different traceId for diferent inserts", () => {
+  it("should create different traceId for different messages", () => {
     const message1 = createIngestMessage("http://test.com");
     const message2 = createIngestMessage("http://test.com");
 
