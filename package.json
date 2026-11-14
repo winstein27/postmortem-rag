@@ -10,8 +10,8 @@
   "scripts": {
     "producer": "tsx --env-file-if-exists=.env src/producer.ts",
     "worker": "tsx --env-file-if-exists=.env src/worker.ts",
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "infra:up": "docker compose up -d --wait",
     "infra:down": "docker compose down",
     "smoke": "tsx --env-file-if-exists=.env scripts/smoke.ts",

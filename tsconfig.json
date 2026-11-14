@@ -4,8 +4,8 @@
     "lib": ["es2024"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "rootDir": "src",
-    "outDir": "dist",
+    "rootDir": ".",
+    "noEmit": true,
     "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
 }
