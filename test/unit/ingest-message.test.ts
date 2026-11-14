@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { createIngestMessage } from "../../src/ingest/ingest-message.js";
 
 describe("ingest message", () => {
@@ -14,7 +14,7 @@ describe("ingest message", () => {
   });
 
   it("throws on a non-HTTP URL", () => {
-    assert.throws(() => createIngestMessage("ftp://invalid.com"));
+    assert.throws(() => createIngestMessage("ftp://invalid.com"), ZodError);
   });
 
   it("creates a different trace id for each message", () => {
