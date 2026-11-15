@@ -136,8 +136,8 @@ The goal is to measure the system, not just demo it.
 
 - [x] Local stack: Postgres + pgvector, ElasticMQ with DLQ
 - [x] Configuration, SQS client and queue wrapper, unit and integration tests
-- [ ] `data/urls.txt` with the Cloudflare postmortems
-- [ ] Producer
+- [x] `data/urls.txt` with the Cloudflare postmortems
+- [x] Producer
 - [ ] Worker: receive, download, extract, delete; failures reach the DLQ
 - [ ] Structured logs with a trace ID from producer to worker (Pino)
 - [ ] Chunking (by section, ~500 tokens with overlap), with tests
