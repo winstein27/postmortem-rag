@@ -1,7 +1,13 @@
 import { z } from "zod";
 
-export function parseUrlList(text: string): string[] {
-  const set = new Set<string>();
+export type ParsedUrlList = {
+  validUrls: string[];
+  invalidUrls: string[];
+};
+
+export function parseUrlList(text: string): ParsedUrlList {
+  const validUrls = new Set<string>();
+  const invalidUrls = new Set<string>();
   const urlSchema = z.httpUrl({ normalize: true });
 
   for (const raw of text.split("\n")) {
@@ -9,13 +15,13 @@ export function parseUrlList(text: string): string[] {
 
     if (!line.startsWith("#") && line.length > 0) {
       const result = urlSchema.safeParse(line);
-      if (!result.success) {
-        throw new Error(`invalid url: ${line}`);
+      if (result.success) {
+        validUrls.add(result.data);
+      } else {
+        invalidUrls.add(line);
       }
-
-      set.add(result.data);
     }
   }
 
-  return [...set];
+  return { validUrls: [...validUrls], invalidUrls: [...invalidUrls] };
 }
