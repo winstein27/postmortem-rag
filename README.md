@@ -2,7 +2,7 @@
 
 Ask questions about public incident postmortems and get answers grounded in cited sources. Documents flow through a queue-based ingestion pipeline with idempotent workers, and retrieval and answer quality are measured by an automated evaluation.
 
-> **Status: work in progress.** The local stack (Postgres + pgvector, SQS-compatible queue with a dead-letter queue), configuration, queue client, and their tests are in place. The producer, worker, retrieval, API, and evaluation are not built yet. See the [roadmap](#roadmap).
+> **Status: work in progress.** The local stack (Postgres + pgvector, SQS-compatible queue with a dead-letter queue), configuration, queue client, and producer are in place, with tests. The worker is in progress: page download is done. Retrieval, the API, and evaluation are not built yet. See the [roadmap](#roadmap).
 
 ## Why
 
@@ -49,12 +49,13 @@ flowchart LR
 | Visibility timeout 60 s                | Worst case per message is about 40 s, given the timeouts on external calls (page download 10 s, embeddings API 30 s). To be revisited with measured durations. |
 | `maxReceiveCount` 3                    | Two retries for transient failures; permanent failures go to the DLQ.                                                                                          |
 | Long polling (20 s)                    | Avoids empty receives and busy loops.                                                                                                                          |
+| Messages validated with a Zod schema   | The queue is a system boundary. Each `SqsQueue` takes a schema, so a malformed message throws on receive and, after the retries, ends up in the DLQ.             |
 | SQS API locally via ElasticMQ          | Same API as Amazon SQS with no account or token. Moving to real SQS only changes `SQS_ENDPOINT` and `SQS_QUEUE_URL`.                                           |
 | Postgres + pgvector                    | Vectors, full-text search, and metadata in one database, queried with SQL.                                                                                     |
 
 ## Tech stack
 
-Node.js 26 and TypeScript (strict, ESM) · Amazon SQS API (AWS SDK v3) with [ElasticMQ](https://github.com/softwaremill/elasticmq) locally · PostgreSQL 18 with [pgvector](https://github.com/pgvector/pgvector) · Zod for configuration · Docker Compose · `node:test`.
+Node.js 26 and TypeScript (strict, ESM) · Amazon SQS API (AWS SDK v3) with [ElasticMQ](https://github.com/softwaremill/elasticmq) locally · PostgreSQL 18 with [pgvector](https://github.com/pgvector/pgvector) · Zod for configuration and message validation · Docker Compose · `node:test`.
 
 ## Getting started
 
@@ -68,11 +69,9 @@ npm run smoke           # checks pgvector and sends/receives one message
 npm run queue:stats     # message counts per queue, including the DLQ
 ```
 
-Once the producer and worker exist:
-
 ```bash
 npm run producer        # enqueue one message per URL in data/urls.txt
-npm run worker          # consume and ingest
+npm run worker          # consume and ingest (in progress)
 ```
 
 `npm run infra:down` stops the stack. `docker/postgres/init.sql` runs only when the database volume is created, so after changing it, recreate the volume with `docker compose down -v`.
@@ -99,7 +98,7 @@ npm test                  # both
 npm run typecheck
 ```
 
-The integration tests check, against ElasticMQ, that an unacknowledged message comes back after the visibility timeout and that a message moves to the DLQ after `maxReceiveCount` receives.
+Unit tests that make HTTP requests, such as the page download, run against a local `node:http` server, so they need no network access. The integration tests check, against ElasticMQ, that an unacknowledged message comes back after the visibility timeout and that a message moves to the DLQ after `maxReceiveCount` receives.
 
 ## Project layout
 
@@ -111,10 +110,14 @@ data/urls.txt                postmortem URLs, one per line (texts are not commit
 src/
   config/env.ts              environment validation (Zod)
   queue/sqs-client.ts        SQS client: custom endpoint locally, AWS in production
-  queue/sqs-queue.ts         typed send / receive / ack / parse
+  queue/sqs-queue.ts         send / receive / ack, and parse validated by a Zod schema
+  ingest/ingest-message.ts   message schema: URL and trace ID
+  ingest/ingest-publisher.ts sends ingest messages to the queue
+  ingest/parse-url-list.ts   parses data/urls.txt, returning invalid URLs separately
+  ingest/fetch-page.ts       downloads a page with a timeout; rejects non-2xx and non-HTML
   db/pool.ts                 pg pool with pgvector types registered
-  producer.ts                (to do)
-  worker.ts                  (to do)
+  producer.ts                one message per URL in data/urls.txt
+  worker.ts                  (in progress)
 scripts/                     smoke test and queue stats
 test/unit, test/integration
 ```
