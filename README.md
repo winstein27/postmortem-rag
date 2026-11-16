@@ -31,7 +31,7 @@ flowchart LR
 **Ingestion**
 
 1. The **producer** reads `data/urls.txt` and sends one message per postmortem URL to `postmortem-ingest`. It never downloads anything.
-2. The **worker** receives a message, downloads the page, extracts the title, date, sections, and text, splits it into chunks, creates embeddings, and upserts the chunks into Postgres. It deletes the message only after everything succeeds.
+2. The **worker** receives a message, downloads the page, extracts the title, date, sections, and text, stores the extracted text, splits it into chunks, creates embeddings, and replaces the document's chunks in Postgres. It deletes the message only after everything succeeds.
 3. If processing throws, the message is not deleted. It becomes visible again after the visibility timeout and is retried. After 3 receives it moves to `postmortem-ingest-dlq`, so permanent failures don't block the queue.
 
 **Querying** (planned)
@@ -42,16 +42,35 @@ flowchart LR
 
 ## Design decisions
 
-| Decision                               | Reason                                                                                                                                                         |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Standard queue, at-least-once delivery | A message can arrive more than once, so the worker must be **idempotent**: processing the same message twice must not duplicate data.                          |
-| Upsert keyed by content hash           | Reprocessing a postmortem that hasn't changed is a no-op; a changed page replaces its old chunks.                                                              |
-| Visibility timeout 60 s                | Worst case per message is about 40 s, given the timeouts on external calls (page download 10 s, embeddings API 30 s). To be revisited with measured durations. |
-| `maxReceiveCount` 3                    | Two retries for transient failures; permanent failures go to the DLQ.                                                                                          |
-| Long polling (20 s)                    | Avoids empty receives and busy loops.                                                                                                                          |
-| Messages validated with a Zod schema   | The queue is a system boundary. Each `SqsQueue` takes a schema, so a malformed message throws on receive and, after the retries, ends up in the DLQ.             |
-| SQS API locally via ElasticMQ          | Same API as Amazon SQS with no account or token. Moving to real SQS only changes `SQS_ENDPOINT` and `SQS_QUEUE_URL`.                                           |
-| Postgres + pgvector                    | Vectors, full-text search, and metadata in one database, queried with SQL.                                                                                     |
+| Decision                                               | Reason                                                                                                                                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Standard queue, at-least-once delivery                 | A message can arrive more than once, so the worker must be **idempotent**: processing the same message twice must not duplicate data.                                     |
+| Idempotency by URL, content hash, and pipeline version | Reprocessing an unchanged postmortem is a no-op; a changed page or a changed pipeline replaces the document's chunks in one transaction. See [Idempotency](#idempotency). |
+| Extracted text stored in Postgres                      | Chunking and embeddings can be redone without downloading the pages again, which keeps chunking experiments cheap.                                                        |
+| Visibility timeout 60 s                                | Worst case per message is about 40 s (page download 10 s, one embeddings call 30 s), with one message per receive. To be revisited with measured durations.               |
+| `maxReceiveCount` 3                                    | Two retries for transient failures; permanent failures go to the DLQ.                                                                                                     |
+| Long polling (20 s)                                    | Avoids empty receives and busy loops.                                                                                                                                     |
+| Messages validated with a Zod schema                   | The queue is a system boundary. Each `SqsQueue` takes a schema, so a malformed message throws on receive and, after the retries, ends up in the DLQ.                      |
+| Page download limited to allowed hosts (planned)       | The queue is a system boundary, so the worker must not fetch whatever URL a message carries.                                                                              |
+| SQS API locally via ElasticMQ                          | Same API as Amazon SQS with no account or token. Moving to real SQS only changes `SQS_ENDPOINT` and `SQS_QUEUE_URL`.                                                      |
+| Postgres + pgvector                                    | Vectors, full-text search, and metadata in one database, queried with SQL.                                                                                                |
+
+### Idempotency
+
+Planned design, not built yet:
+
+- `documents` has one row per URL (unique), with the content hash of the extracted text, the pipeline version, and the extracted text itself. `chunks` rows belong to a document.
+- The **pipeline version** changes whenever the chunking rules or the embeddings model change. Without it, reprocessing after such a change would be skipped, because the page content is the same.
+- Same content hash and same pipeline version: the message is a no-op. Otherwise the worker deletes the document's chunks and inserts the new ones in a single transaction, so a changed page never leaves old chunks behind.
+- The unique URL makes two workers that receive the same message at the same time converge on one document instead of duplicating it.
+
+### Known limitations
+
+- **Permanent failures are retried like transient ones.** A 404 or a malformed message is received 3 times before it reaches the DLQ, which takes about 3 minutes with a 60 s visibility timeout.
+- **No DLQ tooling.** `npm run queue:stats` shows the DLQ count, but nothing inspects or redrives its messages yet.
+- **The 40 s worst case is an estimate.** It assumes a single embeddings call per postmortem and ignores AWS SDK retries and database time. A long post that needs several embeddings calls can exceed it.
+- **The visibility timeout assumes one message per receive.** `SqsQueue.receive` defaults to 10 messages; a worker that processes a batch in sequence would exceed the timeout on the later ones.
+- **Small corpus during development.** `data/urls.txt` holds a handful of URLs for now. With so few chunks, the top 5 almost always contains the right one, so the evaluation only becomes meaningful after the list grows to 50 or more postmortems.
 
 ## Tech stack
 
@@ -131,7 +150,7 @@ The goal is to measure the system, not just demo it.
 - **Answer metrics:** valid citations (every `[n]` points to a retrieved chunk) and correct refusals on the unanswerable questions. LLM-as-judge faithfulness comes in the full version, checked by hand on a sample.
 - **Output:** a table in the terminal and a versioned results file. The README will compare vector-only and hybrid search.
 
-`npm run eval` will run it. No results yet.
+`npm run eval` will run it. No results yet. The numbers will be reported only for a corpus of 50 or more postmortems (see [Known limitations](#known-limitations)).
 
 ## Roadmap
 
@@ -142,12 +161,15 @@ The goal is to measure the system, not just demo it.
 - [x] `data/urls.txt` with the Cloudflare postmortems
 - [x] Producer
 - [ ] Worker: receive, download, extract, delete; failures reach the DLQ
-- [ ] Structured logs with a trace ID from producer to worker (Pino)
+- [ ] Schema and migrations: `documents` (unique URL, content hash, pipeline version, extracted text) and `chunks`
 - [ ] Chunking (by section, ~500 tokens with overlap), with tests
-- [ ] Embeddings and idempotent upsert by content hash
-- [ ] Hybrid search with RRF
-- [ ] `POST /ask` with citations
+- [ ] Embeddings and idempotent replace of a document's chunks
+- [ ] Vector search and `POST /ask` with citations (first end-to-end path)
+- [ ] Grow `data/urls.txt` to 50+ postmortems
 - [ ] Golden set and `npm run eval`
+- [ ] Hybrid search with RRF, compared against vector-only
+- [ ] Hardening: host allowlist and response size limit on page download, structured logs with a trace ID from producer to worker (Pino)
+- [ ] CI on GitHub Actions running typecheck and tests; lint and formatting
 - [ ] Results and limitations in this README
 
 **Full version**
@@ -155,7 +177,8 @@ The goal is to measure the system, not just demo it.
 - [ ] Deploy on AWS with real SQS
 - [ ] OpenTelemetry tracing from the API to the worker
 - [ ] LLM-as-judge faithfulness
-- [ ] CI on GitHub Actions running tests and evaluation
+- [ ] Evaluation in CI
+- [ ] DLQ inspection and redrive; no retries for permanent failures
 - [ ] A second postmortem source ([danluu/post-mortems](https://github.com/danluu/post-mortems))
 
 **Out of scope:** frontend, authentication, streaming, reranking, agents, fine-tuning.

@@ -7,7 +7,7 @@ Public overview, design decisions, and roadmap: README.md. Tick the roadmap chec
 ## Architecture
 
 - **Producer** (`src/producer.ts`): reads `data/urls.txt` and sends one message per postmortem URL to the `postmortem-ingest` queue.
-- **Worker** (`src/worker.ts`): receives a message, downloads the page, extracts the text, splits it into chunks, creates embeddings, upserts the chunks into Postgres (pgvector) keyed by content hash, and only then deletes the message.
+- **Worker** (`src/worker.ts`): receives a message, downloads the page, extracts the text, stores the extracted text, splits it into chunks, creates embeddings, replaces the document's chunks in Postgres (pgvector), and only then deletes the message.
 - **DLQ**: messages that fail 3 times go to `postmortem-ingest-dlq`.
 - **Query API** (later): embeds the question, retrieves the closest chunks, asks the LLM to answer only from them, and returns the sources.
 
@@ -21,7 +21,9 @@ Public overview, design decisions, and roadmap: README.md. Tick the roadmap chec
 ## Decisions
 
 - Standard queue with at-least-once delivery, so the worker must be idempotent: processing the same message twice must not duplicate data.
-- Visibility timeout 60 s: the worst case is about 40 s, given the timeouts on external calls (page download 10 s, embeddings API 30 s). Revisit with measured durations.
+- Idempotency (planned): `documents` has one row per URL (unique) with the content hash, the pipeline version, and the extracted text; `chunks` belong to a document. Same hash and pipeline version is a no-op; otherwise the document's chunks are replaced in one transaction. The pipeline version changes with the chunking rules or the embeddings model.
+- Visibility timeout 60 s: the worst case is about 40 s, given the timeouts on external calls (page download 10 s, one embeddings call 30 s) and one message per receive. Revisit with measured durations.
+- Build order: get one end-to-end path working (worker, schema, chunking, embeddings, vector search, `POST /ask`) before hardening. `data/urls.txt` stays small during development and grows to 50+ postmortems before the evaluation.
 - `maxReceiveCount` 3: two retries for transient failures; permanent failures reach the DLQ without blocking the queue.
 - Long polling (`receiveMessageWait` 20 s) to avoid empty receives.
 
