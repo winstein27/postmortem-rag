@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { env } from "./config/env.js";
-import type { IngestMessage } from "./ingest/ingest-message.js";
+import { ingestMessageSchema } from "./ingest/ingest-message.js";
 import { IngestPublisher } from "./ingest/ingest-publisher.js";
 import { parseUrlList } from "./ingest/parse-url-list.js";
 import { sqsClient } from "./queue/sqs-client.js";
@@ -33,7 +33,7 @@ export async function produce(
 
 async function main() {
   // create queue and publisher
-  const queue = new SqsQueue<IngestMessage>(sqsClient, env.SQS_QUEUE_URL);
+  const queue = new SqsQueue(sqsClient, env.SQS_QUEUE_URL, ingestMessageSchema);
   const publisher = new IngestPublisher(queue);
 
   // read file

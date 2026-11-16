@@ -9,6 +9,7 @@ import {
 } from "@aws-sdk/client-sqs";
 import { env } from "../../src/config/env.js";
 import { createSqsClient } from "../../src/queue/sqs-client.js";
+import { z } from "zod";
 import { SqsQueue } from "../../src/queue/sqs-queue.js";
 
 const client = createSqsClient(env);
@@ -52,7 +53,7 @@ describe("SqsQueue against ElasticMQ", () => {
   });
 
   it("sends, receives, and acks a message", async () => {
-    const queue = new SqsQueue<{ url: string }>(client, url);
+    const queue = new SqsQueue(client, url, z.object({ url: z.string() }));
     const payload = { url: "https://blog.cloudflare.com/example" };
 
     const id = await queue.send(payload);
@@ -70,7 +71,7 @@ describe("SqsQueue against ElasticMQ", () => {
   });
 
   it("returns the message to the queue when it is not acked", async () => {
-    const queue = new SqsQueue<{ n: number }>(client, url);
+    const queue = new SqsQueue(client, url, z.object({ n: z.number() }));
     await queue.send({ n: 1 });
     const [first] = await queue.receive({ waitTimeSeconds: 2, visibilityTimeoutSeconds: 1 });
     assert.ok(first);
@@ -89,7 +90,8 @@ describe("Dead-letter queue", () => {
       RedrivePolicy: JSON.stringify({ deadLetterTargetArn: await queueArn(dlqUrl), maxReceiveCount: "2" }),
     });
 
-    const main = new SqsQueue<{ boom: boolean }>(client, mainUrl);
+    const schema = z.object({ boom: z.boolean() });
+    const main = new SqsQueue(client, mainUrl, schema);
     const id = await main.send({ boom: true });
 
     // Receive without acking until the delivery limit is reached
@@ -99,7 +101,7 @@ describe("Dead-letter queue", () => {
     }
     assert.deepEqual(await main.receive({ waitTimeSeconds: 1, visibilityTimeoutSeconds: 0 }), []);
 
-    const dlq = new SqsQueue<{ boom: boolean }>(client, dlqUrl);
+    const dlq = new SqsQueue(client, dlqUrl, schema);
     const [dead] = await dlq.receive({ waitTimeSeconds: 2 });
     assert.ok(dead);
     assert.equal(dead.MessageId, id);

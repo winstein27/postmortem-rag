@@ -2,6 +2,7 @@
 import { pool } from "../src/db/pool.js";
 import { env } from "../src/config/env.js";
 import { sqsClient } from "../src/queue/sqs-client.js";
+import { z } from "zod";
 import { SqsQueue } from "../src/queue/sqs-queue.js";
 
 const { rows } = await pool.query<{ extversion: string }>(
@@ -9,7 +10,7 @@ const { rows } = await pool.query<{ extversion: string }>(
 );
 console.log("pgvector:", rows[0]?.extversion ?? "NOT INSTALLED");
 
-const queue = new SqsQueue<{ ping: string }>(sqsClient, env.SQS_QUEUE_URL);
+const queue = new SqsQueue(sqsClient, env.SQS_QUEUE_URL, z.object({ ping: z.string() }));
 console.log("queue url:", queue.queueUrl);
 const id = await queue.send({ ping: new Date().toISOString() });
 console.log("sent:", id);

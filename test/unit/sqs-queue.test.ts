@@ -6,9 +6,11 @@ import {
   SendMessageCommand,
   type SQSClient,
 } from "@aws-sdk/client-sqs";
+import { z } from "zod";
 import { SqsQueue } from "../../src/queue/sqs-queue.js";
 
 const QUEUE_URL = "http://sqs.local/000000000000/q";
+const schema = z.object({ url: z.string() });
 
 /** Fake client that records the commands it receives and answers with the handler. */
 function fakeClient(handler: (cmd: object) => unknown) {
@@ -34,21 +36,21 @@ describe("SqsQueue", () => {
   });
 
   it("send serializes the body as JSON", async () => {
-    const queue = new SqsQueue<{ url: string }>(fake.client, QUEUE_URL);
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
     assert.equal(await queue.send({ url: "https://a" }), "msg-1");
     const cmd = fake.calls.find((c) => c instanceof SendMessageCommand) as SendMessageCommand;
     assert.deepEqual(cmd.input, { QueueUrl: QUEUE_URL, MessageBody: '{"url":"https://a"}' });
   });
 
   it("receive uses long polling and the maximum batch size by default", async () => {
-    const queue = new SqsQueue(fake.client, QUEUE_URL);
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
     assert.deepEqual(await queue.receive(), []);
     const cmd = fake.calls.find((c) => c instanceof ReceiveMessageCommand) as ReceiveMessageCommand;
     assert.deepEqual(cmd.input, { QueueUrl: QUEUE_URL, MaxNumberOfMessages: 10, WaitTimeSeconds: 20 });
   });
 
   it("receive passes through the given options", async () => {
-    const queue = new SqsQueue(fake.client, QUEUE_URL);
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
     await queue.receive({ maxMessages: 1, waitTimeSeconds: 0, visibilityTimeoutSeconds: 5 });
     const cmd = fake.calls.find((c) => c instanceof ReceiveMessageCommand) as ReceiveMessageCommand;
     assert.deepEqual(cmd.input, {
@@ -60,20 +62,25 @@ describe("SqsQueue", () => {
   });
 
   it("ack deletes the message by ReceiptHandle", async () => {
-    const queue = new SqsQueue(fake.client, QUEUE_URL);
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
     await queue.ack({ ReceiptHandle: "rh-1" });
     const cmd = fake.calls.find((c) => c instanceof DeleteMessageCommand) as DeleteMessageCommand;
     assert.deepEqual(cmd.input, { QueueUrl: QUEUE_URL, ReceiptHandle: "rh-1" });
   });
 
   it("ack ignores a message without a ReceiptHandle", async () => {
-    const queue = new SqsQueue(fake.client, QUEUE_URL);
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
     await queue.ack({});
     assert.equal(fake.calls.length, 0);
   });
 
   it("parse deserializes the body", () => {
-    const queue = new SqsQueue<{ url: string }>(fake.client, QUEUE_URL);
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
     assert.deepEqual(queue.parse({ Body: '{"url":"https://a"}' }), { url: "https://a" });
+  });
+
+  it("parse throws when the body does not match the schema", () => {
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
+    assert.throws(() => queue.parse({ Body: '{"link":"https://a"}' }), z.ZodError);
   });
 });

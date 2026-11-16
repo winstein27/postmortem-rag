@@ -5,6 +5,7 @@ import {
   type Message,
   type SQSClient,
 } from "@aws-sdk/client-sqs";
+import type { z } from "zod";
 
 export interface ReceiveOptions {
   maxMessages?: number;
@@ -16,6 +17,7 @@ export class SqsQueue<T> {
   constructor(
     private readonly client: SQSClient,
     readonly queueUrl: string,
+    private readonly schema: z.ZodType<T>,
   ) {}
 
   async send(body: T): Promise<string | undefined> {
@@ -53,6 +55,6 @@ export class SqsQueue<T> {
   }
 
   parse(message: Message): T {
-    return JSON.parse(message.Body ?? "null") as T;
+    return this.schema.parse(JSON.parse(message.Body ?? "null"));
   }
 }
