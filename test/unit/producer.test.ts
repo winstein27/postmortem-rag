@@ -35,6 +35,40 @@ describe("producer", () => {
     assert.equal(publishMock.calls[0]?.arguments[0], "http://valid.com/");
   });
 
+  it("returns the published and invalid counts", async () => {
+    const textFile = "https://a.com\nhttps://invalid\nhttps://b.com\nnot a url\n";
+
+    const result = await produce(publisher, textFile);
+
+    assert.deepEqual(result, { published: 2, invalid: 2 });
+  });
+
+  it("returns zero invalid when every url is valid", async () => {
+    const textFile = "https://a.com\nhttps://b.com\n";
+
+    const result = await produce(publisher, textFile);
+
+    assert.deepEqual(result, { published: 2, invalid: 0 });
+  });
+
+  it("returns zero counts for a file with only comments and blank lines", async () => {
+    const textFile = "# comment\n\n   \n";
+
+    const result = await produce(publisher, textFile);
+
+    assert.deepEqual(result, { published: 0, invalid: 0 });
+    assert.equal(publisher.publish.mock.callCount(), 0);
+  });
+
+  it("counts a duplicated url once", async () => {
+    const textFile = "https://a.com\nhttps://a.com/\n";
+
+    const result = await produce(publisher, textFile);
+
+    assert.deepEqual(result, { published: 1, invalid: 0 });
+    assert.equal(publisher.publish.mock.callCount(), 1);
+  });
+
   it("rejects and stops when a publish fails", async () => {
     const textFile =
       "# comment 1\nhttps://test.com\nhttp://test2.com/\nhttp://test3.com/\n";

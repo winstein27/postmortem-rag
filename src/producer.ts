@@ -11,7 +11,7 @@ import { SqsQueue } from "./queue/sqs-queue.js";
 export async function produce(
   publisher: Pick<IngestPublisher, "publish">,
   text: string,
-): Promise<void> {
+): Promise<{ published: number; invalid: number }> {
   // parse urls
   const urls = parseUrlList(text);
 
@@ -29,6 +29,8 @@ export async function produce(
       console.warn(`\tskipped invalid URL: ${invalidUrl}`);
     }
   }
+
+  return { published: urls.validUrls.length, invalid: urls.invalidUrls.length };
 }
 
 async function main() {
@@ -41,7 +43,9 @@ async function main() {
   const data = await readFile(filePath);
 
   // publish
-  await produce(publisher, data.toString());
+  const { invalid } = await produce(publisher, data.toString());
+
+  process.exitCode = invalid > 0 ? 1 : 0;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
