@@ -2,7 +2,7 @@
 
 Ask questions about public incident postmortems and get answers grounded in cited sources. Documents flow through a queue-based ingestion pipeline with idempotent workers, and retrieval and answer quality are measured by an automated evaluation.
 
-> **Status: work in progress.** The local stack (Postgres + pgvector, SQS-compatible queue with a dead-letter queue), configuration, queue client, and producer are in place, with tests. The worker is in progress: page download and HTML extraction are done. Retrieval, the API, and evaluation are not built yet. See the [roadmap](#roadmap).
+> **Status: work in progress.** The local stack (Postgres + pgvector, SQS-compatible queue with a dead-letter queue), configuration, queue client, and producer are in place, with tests. The worker polls the queue, downloads and extracts each page, acks it, backs off when the queue is unreachable, and stops gracefully on SIGINT or SIGTERM; it does not store anything yet. Storage, chunking, embeddings, retrieval, the API, and evaluation are not built yet. See the [roadmap](#roadmap).
 
 ## Why
 
@@ -73,6 +73,7 @@ Planned design, not built yet:
 - **Extraction depends on the Cloudflare blog layout.** The article body is read from `.article-content`. If the layout changes, every page fails extraction and its message reaches the DLQ after 3 receives.
 - **The incident date comes from the title only.** Posts whose title has no date, common among older postmortems, get no incident date.
 - **Sections are flat.** `h2` and `h3` headings both start a section, so an `h3` section loses the title of the `h2` above it.
+- **Shutdown may outlast the stop timeout.** On SIGINT or SIGTERM the worker cancels a long poll or a backoff wait at once, but finishes the message in progress, which can take about 40 s. `docker stop` waits 10 s and ECS 30 s by default before a SIGKILL; a killed message is not lost, it comes back after the visibility timeout.
 - **Small corpus during development.** `data/urls.txt` holds a handful of URLs for now. With so few chunks, the top 5 almost always contains the right one, so the evaluation only becomes meaningful after the list grows to 50 or more postmortems.
 
 ## Tech stack
@@ -93,7 +94,7 @@ npm run queue:stats     # message counts per queue, including the DLQ
 
 ```bash
 npm run producer        # enqueue one message per URL in data/urls.txt
-npm run worker          # consume and ingest (in progress)
+npm run worker          # consume and ingest (in progress); Ctrl+C stops it after the current message
 ```
 
 `npm run infra:down` stops the stack. `docker/postgres/init.sql` runs only when the database volume is created, so after changing it, recreate the volume with `docker compose down -v`.
@@ -141,7 +142,7 @@ src/
   ingest/extract-page.ts     extracts a Cloudflare blog post from HTML (cheerio)
   db/pool.ts                 pg pool with pgvector types registered
   producer.ts                one message per URL in data/urls.txt
-  worker.ts                  receives one message, downloads, extracts, and acks it (in progress)
+  worker.ts                  polls the queue; downloads, extracts, and acks each message; graceful shutdown (in progress)
 scripts/                     smoke test and queue stats
 test/unit, test/integration
 ```
@@ -165,7 +166,7 @@ The goal is to measure the system, not just demo it.
 - [x] Configuration, SQS client and queue wrapper, unit and integration tests
 - [x] `data/urls.txt` with the Cloudflare postmortems
 - [x] Producer
-- [ ] Worker: receive, download, extract, delete; failures reach the DLQ
+- [x] Worker: receive, download, extract, delete; failures reach the DLQ
 - [ ] Schema and migrations: `documents` (unique URL, content hash, pipeline version, extracted text) and `chunks`
 - [ ] Chunking (by section, ~500 tokens with overlap), with tests
 - [ ] Embeddings and idempotent replace of a document's chunks

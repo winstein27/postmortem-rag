@@ -1,5 +1,5 @@
 import type { Message } from "@aws-sdk/client-sqs";
-import { setTimeout as sleep } from "node:timers/promises";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { env } from "./config/env.js";
 import { extractPage } from "./ingest/extract-page.js";
@@ -38,8 +38,9 @@ export async function handler(
 
 export async function getMessage(
   queue: Pick<SqsQueue<IngestMessage>, "receive">,
+  signal: AbortSignal,
 ): Promise<Message | undefined> {
-  const [message] = await queue.receive({ maxMessages: 1 });
+  const [message] = await queue.receive({ maxMessages: 1, signal });
 
   if (!message) {
     console.log("No new message.");
@@ -49,23 +50,32 @@ export async function getMessage(
   return message;
 }
 
-async function main() {
-  const queue = new SqsQueue(sqsClient, env.SQS_QUEUE_URL, ingestMessageSchema);
-
+export async function runWorker(
+  queue: Pick<SqsQueue<IngestMessage>, "receive" | "parse" | "ack">,
+  {
+    signal,
+    sleep,
+  }: {
+    signal: AbortSignal;
+    sleep: typeof setTimeout;
+  },
+): Promise<void> {
   let errorWaitTime = 1_000;
-  while (true) {
+  while (!signal.aborted) {
     let message: Message | undefined;
 
     try {
-      message = await getMessage(queue);
+      message = await getMessage(queue, signal);
       errorWaitTime = 1_000;
     } catch (err) {
+      if (signal.aborted) return;
+
       console.error(
         `Failed to receive from the queue, retrying in ${errorWaitTime} ms:`,
         err,
       );
 
-      await sleep(errorWaitTime);
+      await sleep(errorWaitTime, undefined, { signal }).catch(() => undefined);
 
       errorWaitTime = Math.min(errorWaitTime * 2, 30_000);
     }
@@ -80,6 +90,18 @@ async function main() {
       console.error(`Error processing message:\n`, err);
     }
   }
+}
+
+async function main() {
+  const queue = new SqsQueue(sqsClient, env.SQS_QUEUE_URL, ingestMessageSchema);
+
+  const controller = new AbortController();
+  process.once("SIGINT", () => controller.abort());
+  process.once("SIGTERM", () => controller.abort());
+
+  await runWorker(queue, { signal: controller.signal, sleep: setTimeout });
+
+  console.log("Worker stopped.");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
