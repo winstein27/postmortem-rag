@@ -141,7 +141,7 @@ src/
   ingest/extract-page.ts     extracts a Cloudflare blog post from HTML (cheerio)
   db/pool.ts                 pg pool with pgvector types registered
   producer.ts                one message per URL in data/urls.txt
-  worker.ts                  (in progress)
+  worker.ts                  receives one message, downloads, extracts, and acks it (in progress)
 scripts/                     smoke test and queue stats
 test/unit, test/integration
 ```

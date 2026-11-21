@@ -7,7 +7,7 @@ Public overview, design decisions, known limitations, and roadmap: README.md. Ti
 ## Architecture
 
 - **Producer** (`src/producer.ts`): reads `data/urls.txt` and sends one message per postmortem URL to the `postmortem-ingest` queue. Done.
-- **Worker** (`src/worker.ts`): receives one message, downloads the page, extracts title, date, sections, and text, stores the document, splits it into chunks, creates embeddings, replaces the document's chunks in Postgres (pgvector), and only then deletes the message. In progress: `fetchPage` is done; the loop is empty.
+- **Worker** (`src/worker.ts`): receives one message, downloads the page, extracts title, date, sections, and text, stores the document, splits it into chunks, creates embeddings, replaces the document's chunks in Postgres (pgvector), and only then deletes the message. In progress: download, extraction, and ack are done for one message per run; no loop yet, and nothing is stored.
 - **DLQ**: messages that fail 3 times go to `postmortem-ingest-dlq`.
 - **Query API** (next): `POST /ask` with Fastify. Embeds the question, retrieves the top 5 chunks, asks the LLM to answer only from them with `[n]` citations, and returns the sources.
 - **Evaluation**: `npm run eval` runs the golden set and prints hit rate@5, MRR, valid citations, and correct refusals.
