@@ -121,11 +121,14 @@ npm test                  # both
 npm run typecheck
 ```
 
+CI (GitHub Actions) runs the typecheck, unit tests, and build on every push and pull request, and the integration tests in a separate job against the same Docker Compose stack.
+
 Unit tests that make HTTP requests, such as the page download, run against a local `node:http` server, so they need no network access. The integration tests check, against ElasticMQ, that an unacknowledged message comes back after the visibility timeout and that a message moves to the DLQ after `maxReceiveCount` receives.
 
 ## Project layout
 
 ```
+.github/workflows/ci.yml     CI: typecheck, unit tests, and build; integration tests against the stack
 docker/
   elasticmq/elasticmq.conf   ingest queue and DLQ (redrive policy)
   postgres/init.sql          enables the vector extension
@@ -175,7 +178,8 @@ The goal is to measure the system, not just demo it.
 - [ ] Golden set and `npm run eval`
 - [ ] Hybrid search with RRF, compared against vector-only
 - [ ] Hardening: host allowlist and response size limit on page download, structured logs with a trace ID from producer to worker (Pino)
-- [ ] CI on GitHub Actions running typecheck and tests; lint and formatting
+- [x] CI on GitHub Actions: typecheck, unit and integration tests, and build on every push
+- [ ] Lint and formatting, checked in CI
 - [ ] Results and limitations in this README
 
 **Full version**
