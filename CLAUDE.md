@@ -2,35 +2,71 @@
 
 RAG over public incident postmortems (Cloudflare first): ask a question, get an answer grounded only in retrieved postmortem excerpts, with links to the sources.
 
-Public overview, design decisions, and roadmap: README.md. Tick the roadmap checkbox when a step is done.
+Public overview, design decisions, known limitations, and roadmap: README.md. Tick the roadmap checkbox when a step is done, and update the README status line and project layout when files are added.
 
 ## Architecture
 
-- **Producer** (`src/producer.ts`): reads `data/urls.txt` and sends one message per postmortem URL to the `postmortem-ingest` queue.
-- **Worker** (`src/worker.ts`): receives a message, downloads the page, extracts the text, stores the extracted text, splits it into chunks, creates embeddings, replaces the document's chunks in Postgres (pgvector), and only then deletes the message.
+- **Producer** (`src/producer.ts`): reads `data/urls.txt` and sends one message per postmortem URL to the `postmortem-ingest` queue. Done.
+- **Worker** (`src/worker.ts`): receives one message, downloads the page, extracts title, date, sections, and text, stores the document, splits it into chunks, creates embeddings, replaces the document's chunks in Postgres (pgvector), and only then deletes the message. In progress: `fetchPage` is done; the loop is empty.
 - **DLQ**: messages that fail 3 times go to `postmortem-ingest-dlq`.
-- **Query API** (later): embeds the question, retrieves the closest chunks, asks the LLM to answer only from them, and returns the sources.
+- **Query API** (next): `POST /ask` with Fastify. Embeds the question, retrieves the top 5 chunks, asks the LLM to answer only from them with `[n]` citations, and returns the sources.
+- **Evaluation**: `npm run eval` runs the golden set and prints hit rate@5, MRR, valid citations, and correct refusals.
 
 ## Local stack
 
-- `docker compose up -d`: Postgres + pgvector (port 5432) and ElasticMQ (SQS API on 9324). ElasticMQ has no web UI; use `npm run queue:stats` to see queue message counts.
-- Configuration comes from environment variables (see `.env.example`): `DATABASE_URL`, `AWS_REGION`, `SQS_ENDPOINT`, `SQS_QUEUE_URL`. An empty `SQS_ENDPOINT` means real AWS SQS. Never hardcode endpoints or credentials.
-- Commands: `npm run producer`, `npm run worker`.
-- Tests: `npm run test:unit` (no Docker needed), `npm run test:watch` (unit tests, rerun on save), `npm run test:integration` (needs the local stack running), `npm test` (both).
+- `npm run infra:up`: Postgres + pgvector (5432) and ElasticMQ (SQS API on 9324). No web UI; `npm run queue:stats` shows message counts, including the DLQ.
+- Configuration comes from environment variables validated in `src/config/env.ts` (see `.env.example`). An empty `SQS_ENDPOINT` means real AWS SQS. Never hardcode endpoints, credentials, or API keys.
+- `docker/postgres/init.sql` runs only when the volume is created: after changing it, `docker compose down -v`.
+
+## Commands
+
+- `npm run producer`, `npm run worker`, `npm run smoke`, `npm run queue:stats`
+- `npm run typecheck`
+- `npm run test:unit` (no Docker, no network), `npm run test:watch`, `npm run test:integration` (needs the stack), `npm test` (both)
+
+Before saying a task is done, run `npm run typecheck` and `npm run test:unit`, and report the result.
 
 ## Decisions
 
-- Standard queue with at-least-once delivery, so the worker must be idempotent: processing the same message twice must not duplicate data.
-- Idempotency (planned): `documents` has one row per URL (unique) with the content hash, the pipeline version, and the extracted text; `chunks` belong to a document. Same hash and pipeline version is a no-op; otherwise the document's chunks are replaced in one transaction. The pipeline version changes with the chunking rules or the embeddings model.
-- Visibility timeout 60 s: the worst case is about 40 s, given the timeouts on external calls (page download 10 s, one embeddings call 30 s) and one message per receive. Revisit with measured durations.
-- Build order: get one end-to-end path working (worker, schema, chunking, embeddings, vector search, `POST /ask`) before hardening. `data/urls.txt` stays small during development and grows to 50+ postmortems before the evaluation.
-- `maxReceiveCount` 3: two retries for transient failures; permanent failures reach the DLQ without blocking the queue.
-- Long polling (`receiveMessageWait` 20 s) to avoid empty receives.
+- Standard queue, at-least-once delivery, so the worker must be idempotent.
+- Idempotency: `documents` has one row per URL (unique) with the content hash, the pipeline version, and the extracted text; `chunks` belong to a document. Same hash and pipeline version is a no-op; otherwise the document's chunks are replaced in one transaction. The pipeline version changes with the chunking rules or the embeddings model.
+- The worker receives one message at a time (`maxMessages: 1`), because the 60 s visibility timeout is sized for one message (worst case about 40 s: download 10 s, one embeddings call 30 s).
+- `maxReceiveCount` 3 and long polling (20 s).
+- The queue is a system boundary: messages are validated with Zod on receive.
+- LLM and embeddings providers sit behind interfaces, so they can be swapped (including for a local model).
+- Build order: one end-to-end path first (worker, schema, extraction, chunking, embeddings, vector search, `POST /ask`), then evaluation, then hybrid search with RRF, then hardening.
 
 ## Working agreement
 
-- I write the core logic myself: queue consumption (receive, process, delete), idempotency, retrieval, prompts and evaluation. Do not implement these unless I explicitly ask.
-- You may scaffold, configure, write boilerplate, explain code, and review my code and suggest changes.
-- Keep changes small and explain each one in plain terms. Ask before adding a dependency.
-- TypeScript strict mode, ESM. Commit messages follow Conventional Commits.
-- Everything in the repository is written in American English: code, identifiers, comments, log and error messages, test names, docs, config files, and commit messages.
+The rule: I write the core logic and the design decisions. You write the plumbing. When in doubt, ask which side a task is on.
+
+**I write (do not implement unless I explicitly ask; review, explain, and suggest tests instead):**
+
+- Worker loop: receive, parse, process, ack, and failure handling
+- Idempotency: content hash, pipeline version, transactional replace of chunks
+- Chunking (`src/ingest/chunk.ts`), with tests
+- Provider interfaces (`EmbeddingsProvider`, `LlmProvider`): the types only
+- Retrieval SQL: vector search, full-text search, RRF
+- Prompts and citation parsing
+- Evaluation metric functions (hit rate@5, MRR, citation validity, refusals) and the golden set questions
+- The `ExtractedPage` type (the extraction contract)
+
+**You may implement:**
+
+- HTML extraction (`src/ingest/extract-page.ts`) with cheerio, against my `ExtractedPage` type, plus its tests
+- SQL migrations and a minimal migration runner (I review the schema before it is applied)
+- Provider adapters: the SDK calls behind my interfaces, batching, timeouts
+- Fastify server scaffolding, route wiring, request/response validation
+- The eval runner around my metric functions: loading the golden set, running the queries, printing the table, writing the results file
+- Logging (Pino), CI (GitHub Actions), lint and formatting, scripts, Docker and config
+- English polish of the README and comments
+
+**How to work:**
+
+- For changes across more than one file, show a short plan first and wait for my OK.
+- Keep changes small and explain each one in plain terms. Do not commit; suggest a Conventional Commits message.
+- Ask before adding a dependency. Pre-approved: `cheerio`, `fastify`, `pino`.
+- Tests use `node:test` and `node:assert/strict` with `tsx`. Unit tests need no network or Docker: HTTP calls go to a local `node:http` server or a fake provider.
+- Test fixtures must not contain real postmortem text (the texts are never committed). Use small synthetic HTML that mirrors the Cloudflare blog structure.
+- No code, prompts, or data from other projects go into this repository.
+- TypeScript strict mode, ESM. Everything in the repository is written in American English: code, identifiers, comments, log and error messages, test names, docs, config, and commit messages.
