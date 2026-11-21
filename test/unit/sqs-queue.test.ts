@@ -12,16 +12,18 @@ import { SqsQueue } from "../../src/queue/sqs-queue.js";
 const QUEUE_URL = "http://sqs.local/000000000000/q";
 const schema = z.object({ url: z.string() });
 
-/** Fake client that records the commands it receives and answers with the handler. */
+/** Fake client that records the commands and send options it receives and answers with the handler. */
 function fakeClient(handler: (cmd: object) => unknown) {
   const calls: object[] = [];
+  const options: unknown[] = [];
   const client = {
-    send: async (cmd: object) => {
+    send: async (cmd: object, opts?: unknown) => {
       calls.push(cmd);
+      options.push(opts);
       return handler(cmd);
     },
   } as unknown as SQSClient;
-  return { client, calls };
+  return { client, calls, options };
 }
 
 const defaultHandler = (cmd: object) => {
@@ -59,6 +61,19 @@ describe("SqsQueue", () => {
       WaitTimeSeconds: 0,
       VisibilityTimeout: 5,
     });
+  });
+
+  it("receive passes the abort signal to the client", async () => {
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
+    const controller = new AbortController();
+    await queue.receive({ signal: controller.signal });
+    assert.deepEqual(fake.options, [{ abortSignal: controller.signal }]);
+  });
+
+  it("receive sends no abort signal when none is given", async () => {
+    const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
+    await queue.receive();
+    assert.deepEqual(fake.options, [{}]);
   });
 
   it("ack deletes the message by ReceiptHandle", async () => {

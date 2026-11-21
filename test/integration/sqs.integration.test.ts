@@ -80,6 +80,20 @@ describe("SqsQueue against ElasticMQ", () => {
     assert.equal(again.MessageId, first.MessageId);
     await queue.ack(again);
   });
+
+  it("cancels a long poll in progress when the signal aborts", async () => {
+    // A queue of its own, so no message can arrive and end the poll early.
+    const emptyUrl = await createQueue(`test-abort-${randomUUID()}`);
+    const queue = new SqsQueue(client, emptyUrl, z.object({ url: z.string() }));
+    const controller = new AbortController();
+
+    const started = performance.now();
+    const pending = queue.receive({ waitTimeSeconds: 20, signal: controller.signal });
+    setTimeout(() => controller.abort(), 200);
+
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.ok(performance.now() - started < 2_000, "receive should not wait for the 20 s long poll");
+  });
 });
 
 describe("Dead-letter queue", () => {

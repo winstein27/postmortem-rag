@@ -11,6 +11,12 @@ export interface ReceiveOptions {
   maxMessages?: number;
   waitTimeSeconds?: number;
   visibilityTimeoutSeconds?: number;
+  /**
+   * Cancels the request, including a long poll in progress; receive then
+   * rejects with an AbortError. A message SQS already delivered but the
+   * caller never saw becomes visible again after the visibility timeout.
+   */
+  signal?: AbortSignal;
 }
 
 export class SqsQueue<T> {
@@ -40,6 +46,7 @@ export class SqsQueue<T> {
           ? { VisibilityTimeout: opts.visibilityTimeoutSeconds }
           : {}),
       }),
+      opts.signal ? { abortSignal: opts.signal } : {},
     );
     return Messages ?? [];
   }
