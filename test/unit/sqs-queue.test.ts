@@ -68,10 +68,19 @@ describe("SqsQueue", () => {
     assert.deepEqual(cmd.input, { QueueUrl: QUEUE_URL, ReceiptHandle: "rh-1" });
   });
 
-  it("ack ignores a message without a ReceiptHandle", async () => {
+  it("ack throws for a message without a ReceiptHandle and sends nothing", async () => {
     const queue = new SqsQueue(fake.client, QUEUE_URL, schema);
-    await queue.ack({});
+    await assert.rejects(queue.ack({ MessageId: "msg-1" }), /msg-1: it has no receipt handle/);
     assert.equal(fake.calls.length, 0);
+  });
+
+  it("ack propagates a failed delete", async () => {
+    const failing = fakeClient((cmd) => {
+      if (cmd instanceof DeleteMessageCommand) throw new Error("ReceiptHandleIsInvalid");
+      return {};
+    });
+    const queue = new SqsQueue(failing.client, QUEUE_URL, schema);
+    await assert.rejects(queue.ack({ ReceiptHandle: "rh-1" }), /ReceiptHandleIsInvalid/);
   });
 
   it("parse deserializes the body", () => {

@@ -44,8 +44,16 @@ export class SqsQueue<T> {
     return Messages ?? [];
   }
 
+  /**
+   * Deletes a received message. Throws when the message has no receipt handle
+   * or the delete fails, so the caller never treats an unacked message as done.
+   */
   async ack(message: Message): Promise<void> {
-    if (!message.ReceiptHandle) return;
+    if (!message.ReceiptHandle) {
+      throw new Error(
+        `Cannot ack message ${message.MessageId ?? "(no id)"}: it has no receipt handle.`,
+      );
+    }
     await this.client.send(
       new DeleteMessageCommand({
         QueueUrl: this.queueUrl,
