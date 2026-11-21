@@ -2,7 +2,7 @@
 
 Ask questions about public incident postmortems and get answers grounded in cited sources. Documents flow through a queue-based ingestion pipeline with idempotent workers, and retrieval and answer quality are measured by an automated evaluation.
 
-> **Status: work in progress.** The local stack (Postgres + pgvector, SQS-compatible queue with a dead-letter queue), configuration, queue client, and producer are in place, with tests. The worker is in progress: page download is done. Retrieval, the API, and evaluation are not built yet. See the [roadmap](#roadmap).
+> **Status: work in progress.** The local stack (Postgres + pgvector, SQS-compatible queue with a dead-letter queue), configuration, queue client, and producer are in place, with tests. The worker is in progress: page download and HTML extraction are done. Retrieval, the API, and evaluation are not built yet. See the [roadmap](#roadmap).
 
 ## Why
 
@@ -70,11 +70,14 @@ Planned design, not built yet:
 - **No DLQ tooling.** `npm run queue:stats` shows the DLQ count, but nothing inspects or redrives its messages yet.
 - **The 40 s worst case is an estimate.** It assumes a single embeddings call per postmortem and ignores AWS SDK retries and database time. A long post that needs several embeddings calls can exceed it.
 - **The visibility timeout assumes one message per receive.** `SqsQueue.receive` defaults to 10 messages; a worker that processes a batch in sequence would exceed the timeout on the later ones.
+- **Extraction depends on the Cloudflare blog layout.** The article body is read from `.article-content`. If the layout changes, every page fails extraction and its message reaches the DLQ after 3 receives.
+- **The incident date comes from the title only.** Posts whose title has no date, common among older postmortems, get no incident date.
+- **Sections are flat.** `h2` and `h3` headings both start a section, so an `h3` section loses the title of the `h2` above it.
 - **Small corpus during development.** `data/urls.txt` holds a handful of URLs for now. With so few chunks, the top 5 almost always contains the right one, so the evaluation only becomes meaningful after the list grows to 50 or more postmortems.
 
 ## Tech stack
 
-Node.js 26 and TypeScript (strict, ESM) · Amazon SQS API (AWS SDK v3) with [ElasticMQ](https://github.com/softwaremill/elasticmq) locally · PostgreSQL 18 with [pgvector](https://github.com/pgvector/pgvector) · Zod for configuration and message validation · Docker Compose · `node:test`.
+Node.js 26 and TypeScript (strict, ESM) · Amazon SQS API (AWS SDK v3) with [ElasticMQ](https://github.com/softwaremill/elasticmq) locally · PostgreSQL 18 with [pgvector](https://github.com/pgvector/pgvector) · Zod for configuration and message validation · [cheerio](https://cheerio.js.org/) for HTML extraction · Docker Compose · `node:test`.
 
 ## Getting started
 
@@ -134,6 +137,8 @@ src/
   ingest/ingest-publisher.ts sends ingest messages to the queue
   ingest/parse-url-list.ts   parses data/urls.txt, returning invalid URLs separately
   ingest/fetch-page.ts       downloads a page with a timeout; rejects non-2xx and non-HTML
+  ingest/extracted-page.ts   ExtractedPage type: title, incident and publish dates, sections, text
+  ingest/extract-page.ts     extracts a Cloudflare blog post from HTML (cheerio)
   db/pool.ts                 pg pool with pgvector types registered
   producer.ts                one message per URL in data/urls.txt
   worker.ts                  (in progress)
