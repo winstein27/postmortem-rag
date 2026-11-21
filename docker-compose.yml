@@ -28,6 +28,12 @@ services:
       - "${ELASTICMQ_PORT:-9324}:9324" # SQS-compatible API
     volumes:
       - ./docker/elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+    healthcheck:
+      # Healthy once the SQS API answers, so `docker compose up --wait` waits for it
+      test: ["CMD-SHELL", "wget -q -O /dev/null 'http://localhost:9324/?Action=ListQueues'"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
 
 volumes:
   postgres-data:
