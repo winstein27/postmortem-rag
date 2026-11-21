@@ -19,7 +19,7 @@ import {
 } from "node:test";
 import { ingestMessageSchema } from "../../src/ingest/ingest-message.js";
 import { SqsQueue } from "../../src/queue/sqs-queue.js";
-import { handler } from "../../src/worker.js";
+import { getMessage, handler } from "../../src/worker.js";
 
 const QUEUE_URL = "http://sqs.local/000000000000/postmortem-ingest";
 const RECEIPT_HANDLE = "receipt-1";
@@ -45,7 +45,10 @@ const NOT_AN_ARTICLE_HTML = `<!doctype html><html><head>
  * the given messages and records every command, so a test can check whether
  * the message was deleted.
  */
-function fakeQueue(messages: Message[], options: { failDelete?: boolean } = {}) {
+function fakeQueue(
+  messages: Message[] = [],
+  options: { failDelete?: boolean } = {},
+) {
   const commands: object[] = [];
   const client = {
     send: async (command: object) => {
@@ -75,6 +78,46 @@ function message(body: unknown): Message {
     Body: typeof body === "string" ? body : JSON.stringify(body),
   };
 }
+
+describe("worker getMessage", () => {
+  let log: Mock<typeof console.log>;
+
+  beforeEach(() => {
+    log = mock.method(console, "log", () => {});
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it("receives one message at a time and returns it", async () => {
+    const received = message({ url: "https://blog.example.com/post" });
+    const fake = fakeQueue([received]);
+
+    const result = await getMessage(fake.queue);
+
+    assert.equal(result, received);
+    const receives = fake.commands.filter(
+      (command) => command instanceof ReceiveMessageCommand,
+    );
+    assert.equal(receives.length, 1);
+    assert.equal(receives[0]?.input.MaxNumberOfMessages, 1);
+  });
+
+  it("returns undefined and logs when the queue is empty", async () => {
+    const fake = fakeQueue([]);
+
+    const result = await getMessage(fake.queue);
+
+    assert.equal(result, undefined);
+    assert.equal(fake.deletes().length, 0);
+    assert.ok(
+      log.mock.calls.some((call) =>
+        String(call.arguments[0]).includes("No new message."),
+      ),
+    );
+  });
+});
 
 describe("worker handler", () => {
   let server: Server;
@@ -133,37 +176,22 @@ describe("worker handler", () => {
     return { url: `${POSTMORTEM_ORIGIN}${path}`, traceId: randomUUID() };
   }
 
-  describe("empty queue", () => {
-    it("receives one message at a time and does nothing when there is none", async () => {
-      const fake = fakeQueue([]);
-
-      await handler(fake.queue);
-
-      const receives = fake.commands.filter(
-        (command) => command instanceof ReceiveMessageCommand,
-      );
-      assert.equal(receives.length, 1);
-      assert.equal(receives[0]?.input.MaxNumberOfMessages, 1);
-      assert.equal(fake.deletes().length, 0);
-      assert.deepEqual(requests, []);
-      assert.ok(logged("No new message."));
-    });
-  });
-
   describe("parse errors", () => {
     it("rejects a body that is not JSON and keeps the message", async () => {
-      const fake = fakeQueue([message("not json")]);
+      const msg = message("not json");
+      const fake = fakeQueue();
 
-      await assert.rejects(handler(fake.queue), SyntaxError);
+      await assert.rejects(handler(fake.queue, msg), SyntaxError);
 
       assert.equal(fake.deletes().length, 0);
       assert.deepEqual(requests, []);
     });
 
     it("rejects a body that does not match the schema and keeps the message", async () => {
-      const fake = fakeQueue([message({ url: "ftp://example.com/post" })]);
+      const msg = message({ url: "ftp://example.com/post" });
+      const fake = fakeQueue();
 
-      await assert.rejects(handler(fake.queue), { name: "ZodError" });
+      await assert.rejects(handler(fake.queue, msg), { name: "ZodError" });
 
       assert.equal(fake.deletes().length, 0);
       assert.deepEqual(requests, []);
@@ -172,18 +200,20 @@ describe("worker handler", () => {
 
   describe("fetch errors", () => {
     it("rejects a non-2xx response and keeps the message", async () => {
-      const fake = fakeQueue([message(ingestBody("/server-error"))]);
+      const msg = message(ingestBody("/server-error"));
+      const fake = fakeQueue();
 
-      await assert.rejects(handler(fake.queue), /HTTP: 500/);
+      await assert.rejects(handler(fake.queue, msg), /HTTP: 500/);
 
       assert.equal(fake.deletes().length, 0);
       assert.deepEqual(requests, ["/server-error"]);
     });
 
     it("rejects a page that does not exist and keeps the message", async () => {
-      const fake = fakeQueue([message(ingestBody("/missing"))]);
+      const msg = message(ingestBody("/missing"));
+      const fake = fakeQueue();
 
-      await assert.rejects(handler(fake.queue), /HTTP: 404/);
+      await assert.rejects(handler(fake.queue, msg), /HTTP: 404/);
 
       assert.equal(fake.deletes().length, 0);
     });
@@ -191,9 +221,10 @@ describe("worker handler", () => {
 
   describe("extraction errors", () => {
     it("rejects a page that is not a blog post and keeps the message", async () => {
-      const fake = fakeQueue([message(ingestBody("/not-an-article"))]);
+      const msg = message(ingestBody("/not-an-article"));
+      const fake = fakeQueue();
 
-      await assert.rejects(handler(fake.queue), /article-content/);
+      await assert.rejects(handler(fake.queue, msg), /article-content/);
 
       assert.equal(fake.deletes().length, 0);
       assert.deepEqual(requests, ["/not-an-article"]);
@@ -202,9 +233,10 @@ describe("worker handler", () => {
 
   describe("success", () => {
     it("downloads and extracts the page, then deletes the message", async () => {
-      const fake = fakeQueue([message(ingestBody("/article"))]);
+      const msg = message(ingestBody("/article"));
+      const fake = fakeQueue();
 
-      await handler(fake.queue);
+      await handler(fake.queue, msg);
 
       assert.deepEqual(requests, ["/article"]);
       const deletes = fake.deletes();
@@ -212,17 +244,17 @@ describe("worker handler", () => {
       assert.equal(deletes[0]?.input.ReceiptHandle, RECEIPT_HANDLE);
       assert.equal(deletes[0]?.input.QueueUrl, QUEUE_URL);
       assert.ok(logged("removed from queue"));
-      assert.equal(logged("No new message."), false);
     });
   });
 
   describe("ack errors", () => {
     it("wraps a failed delete with the trace ID and does not report the message as removed", async () => {
       const body = ingestBody("/article");
-      const fake = fakeQueue([message(body)], { failDelete: true });
+      const msg = message(body);
+      const fake = fakeQueue([], { failDelete: true });
 
       await assert.rejects(
-        handler(fake.queue),
+        handler(fake.queue, msg),
         ackError(body.traceId, /Delete failed/),
       );
 
@@ -233,10 +265,10 @@ describe("worker handler", () => {
     it("wraps a missing receipt handle with the trace ID and does not report the message as removed", async () => {
       const body = ingestBody("/article");
       const { ReceiptHandle: _, ...withoutHandle } = message(body);
-      const fake = fakeQueue([withoutHandle]);
+      const fake = fakeQueue();
 
       await assert.rejects(
-        handler(fake.queue),
+        handler(fake.queue, withoutHandle),
         ackError(body.traceId, /no receipt handle/),
       );
 
